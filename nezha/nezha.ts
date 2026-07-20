@@ -16,6 +16,7 @@ let stateTimer: NodeJS.Timeout | null = null;
 let connected = false;
 let lastError = "not started";
 let lastReport = 0;
+let publicIP = "";
 
 const PB = {
   varint: (v: number): Buffer => {
@@ -28,9 +29,37 @@ const PB = {
   u64: (f: number, v: number): Buffer => Buffer.concat([PB.tag(f, 0), PB.varint(v || 0)]),
   dbl: (f: number, v: number): Buffer => { const b = Buffer.alloc(8); b.writeDoubleLE(v || 0, 0); return Buffer.concat([PB.tag(f, 1), b]); },
   str: (f: number, v: string): Buffer => { if (!v) return Buffer.alloc(0); const s = Buffer.from(v, "utf8"); return Buffer.concat([PB.tag(f, 2), PB.varint(s.length), s]); },
+  bytes: (f: number, v: Buffer): Buffer => { if (!v || !v.length) return Buffer.alloc(0); return Buffer.concat([PB.tag(f, 2), PB.varint(v.length), v]); },
   msg: (parts: Buffer[]): Buffer => Buffer.concat(parts.filter(x => x && x.length > 0)),
   frame: (m: Buffer): Buffer => { const h = Buffer.alloc(5); h[0] = 0; h.writeUInt32BE(m.length, 1); return Buffer.concat([h, m]); },
 };
+
+// 获取公网 IP
+function getPublicIP(): Promise<string> {
+  return new Promise((resolve) => {
+    const urls = [
+      "https://api.ipify.org",
+      "https://ifconfig.me/ip",
+      "https://ipinfo.io/ip",
+    ];
+    let resolved = false;
+    urls.forEach(url => {
+      https.get(url, { headers: { "User-Agent": "curl/7.88.1" }, timeout: 5000, rejectUnauthorized: false } as any, (res) => {
+        let data = "";
+        res.on("data", (c: Buffer) => data += c);
+        res.on("end", () => {
+          if (resolved) return;
+          const ip = data.trim();
+          if (ip && /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) {
+            resolved = true;
+            resolve(ip);
+          }
+        });
+      }).on("error", () => {}).on("timeout", function(this: any) { this.destroy(); });
+    });
+    setTimeout(() => { if (!resolved) { resolved = true; resolve(""); } }, 10000);
+  });
+}
 
 function sendUnary(path: string, msgBuf: Buffer): Promise<Buffer | null> {
   return new Promise((resolve, reject) => {
@@ -54,6 +83,11 @@ async function connect() {
     if (session) { try { session.destroy(); } catch(e) {} }
     
     lastError = "connecting...";
+    
+    // 先获取公网 IP
+    publicIP = await getPublicIP();
+    console.log("[Nezha] Public IP:", publicIP);
+    
     const url = `https://${NZ_SERVER}`;
     session = http2.connect(url, { rejectUnauthorized: false });
     
@@ -69,11 +103,23 @@ async function connect() {
       PB.u64(4, os.totalmem()), PB.str(7, os.arch()),
       PB.str(8, "encore"), PB.u64(9, Math.floor(Date.now()/1000 - os.uptime())),
       PB.str(10, AGENT_VERSION),
+      PB.str(12, publicIP),  // IP 字段
     ]);
-    try { await sendUnary("/proto.NezhaService/ReportSystemInfo2", hostBuf); } catch(e) {}
+    try { await sendUnary("/proto.NezhaService/ReportSystemInfo2", hostBuf); console.log("[Nezha] Host reported with IP:", publicIP); } catch(e) { console.log("[Nezha] Host report failed:", (e as Error).message); }
     
-    // GeoIP
-    try { await sendUnary("/proto.NezhaService/ReportGeoIP", PB.msg([PB.u64(1, 0), PB.str(2, "")])); } catch(e) {}
+    // GeoIP 上报（带 IP）
+    if (publicIP) {
+      // GeoIP 格式: field 1 = is_ipv6 (0=ipv4), field 2 = bytes(嵌套 msg: field 1 = ip string)
+      const ipInnerMsg = PB.msg([PB.str(1, publicIP)]);
+      const geoBuf = PB.msg([
+        PB.u64(1, publicIP.includes(":") ? 1 : 0),  // ipv6 flag
+        PB.bytes(2, ipInnerMsg),  // IP data
+      ]);
+      try { 
+        await sendUnary("/proto.NezhaService/ReportGeoIP", geoBuf); 
+        console.log("[Nezha] GeoIP reported:", publicIP); 
+      } catch(e) { console.log("[Nezha] GeoIP failed:", (e as Error).message); }
+    }
     
     // State 流
     const stateHeaders: any = { ":method": "POST", ":path": "/proto.NezhaService/ReportSystemState", "content-type": "application/grpc", "te": "trailers", "user-agent": `nezha-agent/${AGENT_VERSION}`, "client-secret": NZ_SECRET, "client-uuid": FIXED_UUID };
@@ -81,7 +127,7 @@ async function connect() {
     stateStream.on("error", () => {});
     stateStream.on("close", () => { connected = false; lastError = "state stream closed"; });
     
-    // 定期上报
+    // 定期上报状态
     stateTimer = setInterval(() => {
       try {
         const memUsed = os.totalmem() - os.freemem();
@@ -102,8 +148,8 @@ async function connect() {
     }, 3000);
     
     connected = true;
-    lastError = "connected ok";
-    console.log("[Nezha] Agent running, UUID=" + FIXED_UUID);
+    lastError = "connected ok, IP=" + publicIP;
+    console.log("[Nezha] Agent running, UUID=" + FIXED_UUID + " IP=" + publicIP);
   } catch(e) {
     connected = false;
     lastError = `failed: ${(e as Error).message}`;
@@ -116,8 +162,8 @@ connect();
 
 export const status = api(
   { expose: true, method: "GET", path: "/nezha/status" },
-  async (): Promise<{ connected: boolean; uuid: string; server: string; lastError: string; lastReport: number }> => {
-    return { connected, uuid: FIXED_UUID, server: NZ_SERVER, lastError, lastReport };
+  async (): Promise<{ connected: boolean; uuid: string; server: string; lastError: string; lastReport: number; ip: string }> => {
+    return { connected, uuid: FIXED_UUID, server: NZ_SERVER, lastError, lastReport, ip: publicIP };
   }
 );
 

@@ -211,8 +211,8 @@ async function connect(): Promise<boolean> {
   isConnecting = true;
 
   try {
-    // 如果已经连着，检查 lastReport 是不是在 60 秒内
-    if (connected && lastReport > 0 && (Date.now() - lastReport) < 60000) {
+    // 如果已经连着且最近有上报，不重连
+    if (connected && lastReport > 0 && (Date.now() - lastReport) < 30000) {
       lastError = "already connected, lastReport=" + new Date(lastReport).toISOString();
       isConnecting = false;
       return true;

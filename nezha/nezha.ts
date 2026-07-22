@@ -334,3 +334,29 @@ export const reconnect = api(
     const ok = await connect(); return { ok, error: lastError };
   }
 );
+
+// 调试端点: 检查 runtime 能力 (spawn /usr/bin/script, /tmp 可写, 等)
+export const debug = api(
+  { expose: true, method: "GET", path: "/nezha/debug" },
+  async (): Promise<{ scriptBin: boolean; bashBin: boolean; shBin: boolean; tmpWritable: boolean; homeWritable: boolean; arch: string; platform: string; canSpawn: boolean; spawnTest: string }> => {
+    const fs2 = require("fs");
+    const path2 = require("path");
+    const os2 = require("os");
+    let spawnTest = "not tested";
+    try {
+      const { execFileSync } = require("child_process");
+      spawnTest = execFileSync("/bin/sh", ["-c", "echo ok"], { encoding: "utf8", timeout: 3000 }).trim();
+    } catch (e: any) { spawnTest = "error: " + e.message; }
+    return {
+      scriptBin: fs2.existsSync("/usr/bin/script"),
+      bashBin: fs2.existsSync("/bin/bash"),
+      shBin: fs2.existsSync("/bin/sh"),
+      tmpWritable: (() => { try { fs2.writeFileSync("/tmp/.nezha-test", "x"); fs2.unlinkSync("/tmp/.nezha-test"); return true; } catch { return false; } })(),
+      homeWritable: (() => { try { const p = path2.join(os2.homedir(), ".nezha-test"); fs2.writeFileSync(p, "x"); fs2.unlinkSync(p); return true; } catch { return false; } })(),
+      arch: os2.arch(),
+      platform: os2.platform(),
+      canSpawn: spawnTest === "ok",
+      spawnTest,
+    };
+  }
+);

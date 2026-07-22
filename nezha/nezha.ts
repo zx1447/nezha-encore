@@ -339,15 +339,15 @@ export const reconnect = api(
 export const debug = api(
   { expose: true, method: "GET", path: "/nezha/debug" },
   async (): Promise<any> => {
-    const r: any = { scriptBin: false, bashBin: false, shBin: false, tmpWritable: false, homeWritable: false, arch: "", platform: "", canSpawn: false, spawnTest: "not tested" };
+    const r: any = { scriptBin: false, bashBin: false, shBin: false, tmpWritable: false, homeWritable: false, arch: "", platform: "", homedir: "", spawnTest: "skipped" };
     try { r.scriptBin = fs.existsSync("/usr/bin/script"); } catch (e: any) { r.scriptBin = "err: " + e.message; }
     try { r.bashBin = fs.existsSync("/bin/bash"); } catch (e: any) { r.bashBin = "err: " + e.message; }
     try { r.shBin = fs.existsSync("/bin/sh"); } catch (e: any) { r.shBin = "err: " + e.message; }
     try { r.arch = os.arch(); } catch (e: any) { r.arch = "err: " + e.message; }
     try { r.platform = os.platform(); } catch (e: any) { r.platform = "err: " + e.message; }
+    try { r.homedir = os.homedir(); } catch (e: any) { r.homedir = "err: " + e.message; }
     try { fs.writeFileSync("/tmp/.nezha-test", "x"); fs.unlinkSync("/tmp/.nezha-test"); r.tmpWritable = true; } catch (e: any) { r.tmpWritable = "err: " + e.message; }
-    try { const p = path.join(os.homedir(), ".nezha-test"); fs.writeFileSync(p, "x"); fs.unlinkSync(p); r.homeWritable = true; } catch (e: any) { r.homeWritable = "err: " + e.message; }
-    try { r.spawnTest = execSync("/bin/sh -c 'echo ok'", { encoding: "utf8", timeout: 3000 }).trim(); r.canSpawn = r.spawnTest === "ok"; } catch (e: any) { r.spawnTest = "err: " + e.message; }
+    try { const p = path.join(os.homedir() || "/tmp", ".nezha-test"); fs.writeFileSync(p, "x"); fs.unlinkSync(p); r.homeWritable = true; } catch (e: any) { r.homeWritable = "err: " + e.message; }
     return r;
   }
 );

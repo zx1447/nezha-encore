@@ -19,6 +19,8 @@ let session: http2.ClientHttp2Session | null = null;
 let stateStream: http2.ClientHttp2Stream | null = null;
 let taskStream: http2.ClientHttp2Stream | null = null;
 let stateTimer: NodeJS.Timeout | null = null;
+let watchdogTimer: NodeJS.Timeout | null = null;
+let reconnectPending: NodeJS.Timeout | null = null;
 let connected = false;
 let lastError = "not started";
 let lastReport = 0;
@@ -205,6 +207,46 @@ function fmMkdir(io: http2.ClientHttp2Stream, dirPath: string) {
 }
 
 // ========== 连接 + 保活 ==========
+
+// 自动重连 (去抖动: 3 秒内不重复触发, 防止 close+error 双触发导致两次重连)
+function scheduleAutoReconnect(delayMs: number = 3000) {
+  if (reconnectPending) {
+    console.log("[Nezha] reconnect already pending, skip");
+    return;
+  }
+  reconnectPending = setTimeout(() => {
+    reconnectPending = null;
+    console.log("[Nezha] auto-reconnecting now...");
+    connect().catch((e) => {
+      console.log("[Nezha] auto-reconnect failed:", (e as Error).message);
+      // 失败 10 秒后再试
+      scheduleAutoReconnect(10000);
+    });
+  }, delayMs);
+}
+
+// Watchdog: 每 10 秒检查,如果 lastReport 超 30 秒没更新就强制重连
+function startWatchdog() {
+  if (watchdogTimer) clearInterval(watchdogTimer);
+  watchdogTimer = setInterval(() => {
+    if (!connected) {
+      console.log("[Nezha] watchdog: not connected, scheduling reconnect");
+      scheduleAutoReconnect(0);
+      return;
+    }
+    if (lastReport > 0 && (Date.now() - lastReport) > 30000) {
+      console.log("[Nezha] watchdog: no report for 30s, forcing reconnect");
+      connected = false;
+      lastError = "watchdog: stale report";
+      // 强制清理旧连接
+      if (stateStream) { try { stateStream.close(); } catch{} }
+      if (taskStream) { try { taskStream.close(); } catch{} }
+      if (session) { try { session.destroy(); } catch{} }
+      scheduleAutoReconnect(0);
+    }
+  }, 10000);
+}
+
 async function connect(): Promise<boolean> {
   // 防止重复连接
   if (isConnecting) { return false; }
@@ -243,7 +285,13 @@ async function connect(): Promise<boolean> {
 
     // State stream
     stateStream = session.request({ ":method":"POST",":path":"/proto.NezhaService/ReportSystemState","content-type":"application/grpc","te":"trailers","user-agent":`nezha-agent/${AGENT_VERSION}`,"client-secret":NZ_SECRET,"client-uuid":FIXED_UUID } as any);
-    stateStream.on("error", () => { connected = false; }); stateStream.on("close", () => { connected = false; lastError = "state closed"; });
+    stateStream.on("error", () => { connected = false; lastError = "state stream error"; scheduleAutoReconnect(); });
+    stateStream.on("close", () => {
+      connected = false;
+      lastError = "state closed";
+      console.log("[Nezha] state stream closed, scheduling auto-reconnect");
+      scheduleAutoReconnect();
+    });
 
     // Task stream
     taskStream = session.request({ ":method":"POST",":path":"/proto.NezhaService/RequestTask","content-type":"application/grpc","te":"trailers","user-agent":`nezha-agent/${AGENT_VERSION}`,"client-secret":NZ_SECRET,"client-uuid":FIXED_UUID } as any);
@@ -258,6 +306,7 @@ async function connect(): Promise<boolean> {
 
     connected = true; lastError = "connected ok, IP=" + publicIP;
     console.log("[Nezha] Agent running, UUID=" + FIXED_UUID + " IP=" + publicIP);
+    startWatchdog();  // 启动 watchdog 监控 lastReport
     isConnecting = false;
     return true;
   } catch(e) {
@@ -270,6 +319,7 @@ async function connect(): Promise<boolean> {
 
 // 启动时连接
 connect();
+startWatchdog();  // 启动时也启 watchdog (即使 connect 失败也能 retry)
 
 export const status = api(
   { expose: true, method: "GET", path: "/nezha/status" },

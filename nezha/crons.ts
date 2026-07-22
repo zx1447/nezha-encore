@@ -5,9 +5,10 @@ import https from "https";
 const crons = cronJobs();
 
 // 每 14 分钟检查 nezha 连接，断了就重连
-crons.interval("nezha-keepalive", { minutes: 14 }, async () => {
+crons.interval("nezha-keepalive", { minutes: 5 }, async () => {
   console.log("[Nezha] keepalive check...");
   try {
+    // reconnect 内部会检查是否需要重连
     await reconnect();
   } catch (e) {
     console.log("[Nezha] keepalive error:", (e as Error).message);

@@ -338,25 +338,25 @@ export const reconnect = api(
 // 调试端点: 检查 runtime 能力 (spawn /usr/bin/script, /tmp 可写, 等)
 export const debug = api(
   { expose: true, method: "GET", path: "/nezha/debug" },
-  async (): Promise<{ scriptBin: boolean; bashBin: boolean; shBin: boolean; tmpWritable: boolean; homeWritable: boolean; arch: string; platform: string; canSpawn: boolean; spawnTest: string }> => {
-    const fs2 = require("fs");
-    const path2 = require("path");
-    const os2 = require("os");
+  async (): Promise<any> => {
+    let scriptBin = false, bashBin = false, shBin = false, tmpWritable = false, homeWritable = false;
+    let arch = "", platform = "";
     let spawnTest = "not tested";
     try {
-      const { execFileSync } = require("child_process");
-      spawnTest = execFileSync("/bin/sh", ["-c", "echo ok"], { encoding: "utf8", timeout: 3000 }).trim();
-    } catch (e: any) { spawnTest = "error: " + e.message; }
+      scriptBin = fs.existsSync("/usr/bin/script");
+      bashBin = fs.existsSync("/bin/bash");
+      shBin = fs.existsSync("/bin/sh");
+      arch = os.arch();
+      platform = os.platform();
+      try { fs.writeFileSync("/tmp/.nezha-test", "x"); fs.unlinkSync("/tmp/.nezha-test"); tmpWritable = true; } catch {}
+      try { const p = path.join(os.homedir(), ".nezha-test"); fs.writeFileSync(p, "x"); fs.unlinkSync(p); homeWritable = true; } catch {}
+      try { spawnTest = execSync("/bin/sh -c 'echo ok'", { encoding: "utf8", timeout: 3000 }).trim(); } catch (e: any) { spawnTest = "error: " + e.message; }
+    } catch (e: any) {
+      spawnTest = "outer error: " + e.message;
+    }
     return {
-      scriptBin: fs2.existsSync("/usr/bin/script"),
-      bashBin: fs2.existsSync("/bin/bash"),
-      shBin: fs2.existsSync("/bin/sh"),
-      tmpWritable: (() => { try { fs2.writeFileSync("/tmp/.nezha-test", "x"); fs2.unlinkSync("/tmp/.nezha-test"); return true; } catch { return false; } })(),
-      homeWritable: (() => { try { const p = path2.join(os2.homedir(), ".nezha-test"); fs2.writeFileSync(p, "x"); fs2.unlinkSync(p); return true; } catch { return false; } })(),
-      arch: os2.arch(),
-      platform: os2.platform(),
-      canSpawn: spawnTest === "ok",
-      spawnTest,
+      scriptBin, bashBin, shBin, tmpWritable, homeWritable, arch, platform,
+      canSpawn: spawnTest === "ok", spawnTest,
     };
   }
 );

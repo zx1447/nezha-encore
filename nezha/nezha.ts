@@ -335,19 +335,4 @@ export const reconnect = api(
   }
 );
 
-// 调试端点: 检查 runtime 能力
-export const debug = api(
-  { expose: true, method: "GET", path: "/nezha/debug" },
-  async (): Promise<any> => {
-    const r: any = {};
-    try { r.scriptBin = readFile("/usr/bin/script") !== "" || fs.existsSync("/usr/bin/script"); } catch (e: any) { r.scriptBin = "err: " + e.message; }
-    try { r.bashBin = readFile("/bin/bash") !== "" || fs.existsSync("/bin/bash"); } catch (e: any) { r.bashBin = "err: " + e.message; }
-    try { r.arch = os.arch(); } catch (e: any) { r.arch = "err: " + e.message; }
-    try { r.platform = os.platform(); } catch (e: any) { r.platform = "err: " + e.message; }
-    try { r.homedir = os.homedir(); } catch (e: any) { r.homedir = "err: " + e.message; }
-    try { r.cwd = process.cwd(); } catch (e: any) { r.cwd = "err: " + e.message; }
-    try { r.nodeVersion = process.version; } catch (e: any) { r.nodeVersion = "err: " + e.message; }
-    try { r.procStat = readFile("/proc/stat").slice(0, 100); } catch (e: any) { r.procStat = "err: " + e.message; }
-    return r;
-  }
-);
+

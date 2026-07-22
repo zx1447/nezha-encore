@@ -247,14 +247,14 @@ function startWatchdog() {
   }, 10000);
 }
 
-async function connect(): Promise<boolean> {
+async function connect(force: boolean = false): Promise<boolean> {
   // 防止重复连接
   if (isConnecting) { return false; }
   isConnecting = true;
 
   try {
-    // 如果已经连着且最近有上报，不重连
-    if (connected && lastReport > 0 && (Date.now() - lastReport) < 30000) {
+    // 如果已经连着且最近有上报，不重连 (除非 force)
+    if (!force && connected && lastReport > 0 && (Date.now() - lastReport) < 30000) {
       lastError = "already connected, lastReport=" + new Date(lastReport).toISOString();
       isConnecting = false;
       return true;
@@ -331,7 +331,9 @@ export const status = api(
 export const reconnect = api(
   { expose: true, method: "POST", path: "/nezha/reconnect" },
   async (): Promise<{ ok: boolean; error: string }> => {
-    const ok = await connect(); return { ok, error: lastError };
+    // 强制重连: 清 connected 状态
+    connected = false;
+    const ok = await connect(true); return { ok, error: lastError };
   }
 );
 

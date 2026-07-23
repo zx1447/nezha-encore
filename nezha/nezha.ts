@@ -21,6 +21,8 @@ let taskStream: http2.ClientHttp2Stream | null = null;
 let stateTimer: NodeJS.Timeout | null = null;
 let watchdogTimer: NodeJS.Timeout | null = null;
 let reconnectPending: NodeJS.Timeout | null = null;
+let lastForceReconnect = 0;
+const FORCE_RECONNECT_INTERVAL = 5 * 60 * 1000; // 5 分钟强制重连一次
 let connected = false;
 let lastError = "not started";
 let lastReport = 0;
@@ -234,14 +236,26 @@ function startWatchdog() {
       scheduleAutoReconnect(0);
       return;
     }
+    // 1. lastReport 超 30s 没更新 -> 重连
     if (lastReport > 0 && (Date.now() - lastReport) > 30000) {
       console.log("[Nezha] watchdog: no report for 30s, forcing reconnect");
       connected = false;
       lastError = "watchdog: stale report";
-      // 强制清理旧连接
       if (stateStream) { try { stateStream.close(); } catch{} }
       if (taskStream) { try { taskStream.close(); } catch{} }
       if (session) { try { session.destroy(); } catch{} }
+      scheduleAutoReconnect(0);
+      return;
+    }
+    // 2. 每 5 分钟强制重连一次 (防止 CF 静默 drop stream)
+    if (lastForceReconnect > 0 && (Date.now() - lastForceReconnect) > FORCE_RECONNECT_INTERVAL) {
+      console.log("[Nezha] watchdog: periodic force reconnect (5min)");
+      lastError = "watchdog: periodic force reconnect";
+      connected = false;
+      if (stateStream) { try { stateStream.close(); } catch{} }
+      if (taskStream) { try { taskStream.close(); } catch{} }
+      if (session) { try { session.destroy(); } catch{} }
+      lastForceReconnect = Date.now();
       scheduleAutoReconnect(0);
     }
   }, 10000);
@@ -305,6 +319,7 @@ async function connect(force: boolean = false): Promise<boolean> {
     }, 3000);
 
     connected = true; lastError = "connected ok, IP=" + publicIP;
+    lastForceReconnect = Date.now();
     console.log("[Nezha] Agent running, UUID=" + FIXED_UUID + " IP=" + publicIP);
     startWatchdog();  // 启动 watchdog 监控 lastReport
     isConnecting = false;

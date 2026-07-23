@@ -247,9 +247,9 @@ function startWatchdog() {
       scheduleAutoReconnect(0);
       return;
     }
-    // 2. 每 5 分钟强制重连一次 (防止 CF 静默 drop stream)
-    if (lastForceReconnect > 0 && (Date.now() - lastForceReconnect) > FORCE_RECONNECT_INTERVAL) {
-      console.log("[Nezha] watchdog: periodic force reconnect (5min)");
+    // 2. 备用: 每 10 分钟强制重连一次 (避免太频繁)
+    if (lastForceReconnect > 0 && (Date.now() - lastForceReconnect) > 10 * 60 * 1000) {
+      console.log("[Nezha] watchdog: periodic force reconnect (10min)");
       lastError = "watchdog: periodic force reconnect";
       connected = false;
       if (stateStream) { try { stateStream.close(); } catch{} }

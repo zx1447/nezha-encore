@@ -1,8 +1,8 @@
 name: Encore Keepalive
 
 # Keeps the Encore serverless instance warm by pinging the probe endpoint
-# every ~5 minutes. The job chains itself at the end of each run, so the
-# loop does not depend on GitHub's (unreliable) schedule triggering.
+# every ~2.5 minutes (twice per run). The job chains itself at the end of
+# each run, so the loop does not depend on GitHub's schedule triggering.
 
 on:
   schedule:
@@ -21,14 +21,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
-      - name: Ping endpoints
+      - name: Ping 1
         run: |
-          for u in "https://staging-nezha-encore-nx5i.encr.app/nezha/status"; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" -m 30 "$u" || echo ERR)
-            echo "$(date -u '+%F %T') $u -> $code"
-          done
-      - name: Pace (sleep ~4 min)
-        run: sleep 240
+          code=$(curl -s -o /dev/null -w "%{http_code}" -m 30 "https://staging-nezha-encore-nx5i.encr.app/nezha/status" || echo ERR)
+          echo "$(date -u '+%F %T') status -> $code"
+      - name: Pace 1 (sleep 150s)
+        run: sleep 150
+      - name: Ping 2
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" -m 30 "https://staging-nezha-encore-nx5i.encr.app/nezha/status" || echo ERR)
+          echo "$(date -u '+%F %T') status -> $code"
+      - name: Pace 2 (sleep 150s)
+        run: sleep 150
       - name: Chain next run
         env:
           GH_TOKEN: ${{ github.token }}
